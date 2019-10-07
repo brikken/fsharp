@@ -11,6 +11,7 @@
     <Compile Include="ListExtensions.fs" />
     <Compile Include="ModuleTest.fs" />
     <Compile Include="infix.fs" />
+    <Compile Include="State.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
