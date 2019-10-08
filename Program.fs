@@ -8,24 +8,39 @@ type Action =
     | DoMoreStuff
 
 let doStuff s =
-    State ([ DoStuff ], s + 1)
+    if s > 1 then
+        ResultState ([ DoStuff ], Ok (s + 1))
+    else
+        ResultState ([], Error "Too small")
 
 let doMoreStuff s =
-    State ([ DoMoreStuff ], s - 1)
+    if s < 1 then
+        ResultState ([ DoMoreStuff ], Ok (s - 1))
+    else
+        ResultState ([], Error "Too large")
 
 let getUnionCaseName (x:'a) = 
     match Reflection.FSharpValue.GetUnionFields(x, typeof<'a>) with
     | case, _ -> case.Name  
 
+let testRollback state : Result<unit,string> =
+    Ok ()
+
 [<EntryPoint>]
 let main argv =
     let valueState =
-        state {
-            let! two = doStuff 1
-            let! one = doMoreStuff two
-            return one
+        resultstate {
+            let! three = doStuff 2
+            let zero = three - 3
+            let! negativeOne = doMoreStuff zero
+            //let! zero = doStuff negativeOne
+            return zero
         }
-    let (State (actions, value)) = valueState
-    actions |> List.iter (getUnionCaseName >> printfn "%s")
-    printfn "%i" value
+        |> (atomic testRollback) 
+    match valueState with
+    | Ok atomic ->
+        match atomic with
+        | All x -> printfn "Success: %i" x
+        | None err -> printfn "Rolled back: %s" err
+    | Error err -> printfn "Error: %s" err
     0 // return an integer exit code
