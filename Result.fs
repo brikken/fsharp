@@ -6,7 +6,9 @@ open System
 let ofOption error = function Some s -> Ok s | None -> Error error
 
 type ResultBuilder() =
-    member __.Return(x) = Ok x
+    member __.Return(x) =
+        printfn "return"
+        Ok x
 
     member __.ReturnFrom(m: Result<_, _>) = m
 
@@ -18,7 +20,10 @@ type ResultBuilder() =
                 Error e
             | Ok x ->
                 let r = binder x
-                printfn "bind ending in ok"
+                printf "ok bind ending in "
+                match r with
+                | Ok _ -> printfn "ok"
+                | Error _ -> printfn "error"
                 r
     member __.Bind((m, error): (Option<'T> * 'E), f) = m |> ofOption error |> Result.bind f
 
