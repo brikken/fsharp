@@ -3,44 +3,18 @@
 open System
 open State
 
-type Action =
-    | DoStuff
-    | DoMoreStuff
-
-let doStuff s =
-    if s > 1 then
-        ResultState ([ DoStuff ], Ok (s + 1))
-    else
-        ResultState ([], Error "Too small")
-
-let doMoreStuff s =
-    if s < 1 then
-        ResultState ([ DoMoreStuff ], Ok (s - 1))
-    else
-        ResultState ([], Error "Too large")
-
-let getUnionCaseName (x:'a) = 
-    match Reflection.FSharpValue.GetUnionFields(x, typeof<'a>) with
-    | case, _ -> case.Name  
-
-let testRollback state : Result<unit,string> =
-    Ok ()
 
 [<EntryPoint>]
 let main argv =
-    let valueState =
-        resultstate {
-            let! three = doStuff 2
-            let zero = three - 3
-            let! negativeOne = doMoreStuff zero
-            //let! zero = doStuff negativeOne
-            return zero
+    let dummy =
+        result {
+            //let! a = Ok 1
+            let! a = Error 1
+            let b = a + 1
+            let! c = Error b
+            return c
         }
-        |> (atomic testRollback) 
-    match valueState with
-    | Ok atomic ->
-        match atomic with
-        | All x -> printfn "Success: %i" x
-        | None err -> printfn "Rolled back: %s" err
-    | Error err -> printfn "Error: %s" err
+    match dummy with
+    | Ok a -> printfn "Ok %i" a
+    | Error b -> printfn "Error %i" b
     0 // return an integer exit code
