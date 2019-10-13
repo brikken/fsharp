@@ -5,7 +5,7 @@ open State
 
 let init = Ok 1
 
-let dummy : Result<int,int> =
+let dummy () : Result<int,int> =
     match init with
     | Error error -> Error error
     | Ok a ->
@@ -20,18 +20,23 @@ let dummy : Result<int,int> =
 
 [<EntryPoint>]
 let main argv =
-    match dummy with
-    | Ok a -> printfn "Ok %i" a
-    | Error b -> printfn "Error %i" b
+    // match dummy () with
+    // | Ok a -> printfn "Ok %i" a
+    // | Error b -> printfn "Error %i" b
     let dummy =
         result {
             let! a = init
-            printfn "We passed the init!"
-            let b = a + 1
-            printfn "b is %i" b
-            let! c = Error b
-            printfn "We passed the C!"
-            return c
+            let! c =
+                Error (
+                    printfn "We passed the init!"
+                    let b = a + 1
+                    printfn "b is %i" b
+                    b
+                )
+            return! (
+                printfn "We passed the C!"
+                c
+            )
         }
     match dummy with
     | Ok a -> printfn "Ok %i" a
