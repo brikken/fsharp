@@ -1,31 +1,23 @@
 ﻿// Learn more about F# at http://fsharp.org
 
-open System
-open State
-
-type Action =
-    | DoStuff
-    | DoMoreStuff
-
-let doStuff s =
-    State ([ DoStuff ], s + 1)
-
-let doMoreStuff s =
-    State ([ DoMoreStuff ], s - 1)
-
-let getUnionCaseName (x:'a) = 
-    match Reflection.FSharpValue.GetUnionFields(x, typeof<'a>) with
-    | case, _ -> case.Name  
+let getValueM n =
+    let inner state =
+        (state, n)
+    M inner
 
 [<EntryPoint>]
 let main argv =
-    let valueState =
+    let m =
         state {
-            let! two = doStuff 1
-            let! one = doMoreStuff two
-            return one
+            let! a = getValueM 1
+            return a
         }
-    let (State (actions, value)) = valueState
-    actions |> List.iter (getUnionCaseName >> printfn "%s")
-    printfn "%i" value
+    let m2 =
+        state {
+            let! b = m
+            return b
+        }
+    let (M f) = m2
+    let (State s, v) = f (State 0)
+    printfn "State %i, value %i" s v
     0 // return an integer exit code
