@@ -15,34 +15,32 @@ type Action =
     | ReadAction of TFIOPath * byte []
     | WriteAction of TFIOPath * byte []
 
-type ActionResult =
-    | ReadResult of byte []
-    | WriteResult
+type State = Action list
 
-type State = {
-    log: Action list
-}
+type TFIOError = string
 
-type TFIO<'a> = TFIO of (State -> Result<State * 'a,string>)
+type TFIO<'a> = TFIO of (State -> State * Result<'a,TFIOError>)
 
 type TFIOBuilder() =
-    member __.Return(x) =
+    member _.Return(x) =
         let inner state =
-            Ok (state, x)
+            (state, x)
         TFIO inner
     member __.Bind(x, f) =
-        // TODO: Is this right? Will remaining expressions slide through, once an error has happened?
-        let bound state =
-            let (TFIO fPrev) = x
-            match fPrev state with
-            | Ok (stateNew, y) -> 
-                let (TFIO fNew) = f y
-                fNew stateNew
-            | Error error -> Error error
-        TFIO bound
+        let inner state =
+            let (TFIO fx) = x
+            let (state', x') = fx state
+            match x' with
+            | Ok a ->
+                let (TFIO f') = f a
+                f' state'
+            | Error e ->
+                (state', Error e)
+        TFIO inner
 
 let tfio = TFIOBuilder
 
+// TODO: This signature is probably not correct
 let rollback : State -> Result<unit,'b> = fun state ->
     Ok ()
 
@@ -51,7 +49,7 @@ let readFile : TFIOProvider<'a> -> TFIOPath -> State -> Result<byte [],string> =
         match logItem with
         | WriteAction (writePath, contents) when writePath = path -> Some contents
         | _ -> None
-    match state.log |> List.rev |> List.tryPick prevWriteContents with
+    match state |> List.rev |> List.tryPick prevWriteContents with
     | Some contents -> Ok contents
     | None ->
         try
@@ -62,13 +60,13 @@ let readFile : TFIOProvider<'a> -> TFIOPath -> State -> Result<byte [],string> =
 let readFileTFIO = fun io path ->
     let inner state =
         match readFile io path state with
-        | Ok contents -> Ok ( { log = (ReadAction (path, contents)) :: state.log }, ReadResult contents )
-        | Error error -> Error error
+        | Ok contents -> (ReadAction (path, contents)::state, Ok contents )
+        | Error e -> (state, Error e)
     TFIO inner
 
 let writeFileTFIO = fun path contents ->
     let inner = fun state ->
-        Ok ( { log = (WriteAction (path, contents)) :: state.log }, WriteResult )
+        (WriteAction (path, contents)::state, Ok () )
     TFIO inner
 
 let lockStateFiles : TFIOProvider<'a> -> State -> Result<TFIOLock<'a> list,string> = fun io state ->
@@ -87,7 +85,7 @@ let lockStateFiles : TFIOProvider<'a> -> State -> Result<TFIOLock<'a> list,strin
                     locks |> List.map io.unlock |> ignore
                     Error ex.Message
         | _ -> s
-    state.log
+    state
     |> List.collect fileToLock
     |> List.fold lockFileFolder (Ok [])
     |> Result.map List.rev
@@ -96,17 +94,10 @@ let lockStateFiles : TFIOProvider<'a> -> State -> Result<TFIOLock<'a> list,strin
 let validateLogActions : TFIOProvider<'a> -> State -> Result<unit,string> = fun io state ->
     let validateLogAction action =
         match action with
-        | ReadAction (path, contents) -> failwith ""
+        | ReadAction (path, contents) -> failwith "Not Implemented"
+        | WriteAction (path, contents) -> failwith "Not Implemented"
     failwith ""
 
-let atomically : TFIOProvider<'a> -> TFIO<ActionResult> -> Result<ActionResult,string> = fun io tfio ->
-    let (TFIO action) = tfio
-    let result = action { log = [] }
-    match result with
-    | Ok (state, actionResult) ->
-        match lockStateFiles io state with
-        | Ok locks ->
-            // TODO: call validateLogActions
-            failwith ""
-        | Error error -> Error error
-    | Error error -> Error error
+let atomically : TFIOProvider<'a> -> TFIO<'b> -> State * Result<'b,TFIOError> = fun io tfio ->
+    let (TFIO f) = tfio
+    f []
