@@ -43,3 +43,22 @@ type ResultBuilder() =
         __.Using(sequence.GetEnumerator(), fun enum -> __.While(enum.MoveNext, __.Delay(fun () -> body enum.Current)))
 
 let result = ResultBuilder()
+
+let allOksOrError f xs =
+    let rec folder s xs' =
+        match xs' with
+        | [] -> Ok s
+        | x::xs'' ->
+            match f x with
+            | Error e -> Error e
+            | Ok fx -> folder (fx::s) xs''
+    folder [] xs
+
+let allOksOrErrors f xs =
+    let folder s x =
+        match (s, f x) with
+        | (Error es, Error e) -> Error (e::es)
+        | (Error es, _) -> Error es
+        | (_, Error e) -> Error [e]
+        | (Ok fxs, Ok fx) -> Ok (fx::fxs)
+    List.fold folder (Ok []) xs
