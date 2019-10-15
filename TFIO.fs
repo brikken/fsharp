@@ -2,13 +2,13 @@ module TFIO
 
 type TFIOPath = TFIOPath of string
 
-type TFIOLock<'a> = IOLock of 'a
+type TFIOLock = IOLock of TFIOPath
 
-type TFIOProvider<'a> = {
+type TFIOProvider = {
     read: TFIOPath -> byte []
     write: (TFIOPath * byte []) -> unit
-    lock: TFIOPath -> TFIOLock<'a>
-    unlock: TFIOLock<'a> -> unit
+    lock: TFIOPath -> TFIOLock
+    unlock: TFIOLock -> unit
 }
 
 type Action =
@@ -19,21 +19,21 @@ type State = Action list
 
 type TFIOError = string
 
-type TFIO<'a> = TFIO of (State -> State * Result<'a,TFIOError>)
+type TFIO<'a> = TFIO of (State * TFIOProvider -> State * Result<'a,TFIOError>)
 
 type TFIOBuilder() =
     member _.Return(x) =
-        let inner state =
+        let inner (state, _) =
             (state, x)
         TFIO inner
     member __.Bind(x, f) =
-        let inner state =
+        let inner (state, prov) =
             let (TFIO fx) = x
-            let (state', x') = fx state
+            let (state', x') = fx (state, prov)
             match x' with
             | Ok a ->
                 let (TFIO f') = f a
-                f' state'
+                f' (state', prov)
             | Error e ->
                 (state', Error e)
         TFIO inner
@@ -44,7 +44,7 @@ let tfio = TFIOBuilder
 let rollback : State -> Result<unit,'b> = fun state ->
     Ok ()
 
-let readFile : TFIOProvider<'a> -> TFIOPath -> State -> Result<byte [],string> = fun io path state ->
+let readFile : TFIOProvider -> TFIOPath -> State -> Result<byte [],string> = fun io path state ->
     let prevWriteContents logItem =
         match logItem with
         | WriteAction (writePath, contents) when writePath = path -> Some contents
@@ -57,19 +57,19 @@ let readFile : TFIOProvider<'a> -> TFIOPath -> State -> Result<byte [],string> =
         with
             ex -> Error ex.Message
 
-let readFileTFIO = fun io path ->
-    let inner state =
-        match readFile io path state with
+let readFileTFIO = fun path ->
+    let inner (state, prov) =
+        match readFile prov path state with
         | Ok contents -> (ReadAction (path, contents)::state, Ok contents )
         | Error e -> (state, Error e)
     TFIO inner
 
 let writeFileTFIO = fun path contents ->
-    let inner = fun state ->
+    let inner (state, _) =
         (WriteAction (path, contents)::state, Ok () )
     TFIO inner
 
-let lockStateFiles : TFIOProvider<'a> -> State -> Result<TFIOLock<'a> list,string> = fun io state ->
+let lockStateFiles : TFIOProvider -> State -> Result<TFIOLock list,string> = fun io state ->
     // TODO: When more actions are added, this needs to carry a state, to keep track of already locked files, moved files, deleted files, etc.
     let fileToLock a =
         match a with
@@ -91,13 +91,13 @@ let lockStateFiles : TFIOProvider<'a> -> State -> Result<TFIOLock<'a> list,strin
     |> Result.map List.rev
 
 // TODO: This can return 3 things: Validation success, validation fail, IO exception. The Result type is not sufficient
-let validateLogActions : TFIOProvider<'a> -> State -> Result<unit,string> = fun io state ->
+let validateLogActions : TFIOProvider -> State -> Result<unit,string> = fun io state ->
     let validateLogAction action =
         match action with
         | ReadAction (path, contents) -> failwith "Not Implemented"
         | WriteAction (path, contents) -> failwith "Not Implemented"
     failwith ""
 
-let atomically : TFIOProvider<'a> -> TFIO<'b> -> State * Result<'b,TFIOError> = fun io tfio ->
+let atomically : TFIOProvider -> TFIO<'b> -> State * Result<'b,TFIOError> = fun prov tfio ->
     let (TFIO f) = tfio
-    f []
+    f ([], prov)
