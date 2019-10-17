@@ -4,10 +4,10 @@ open ResultExpression
 
 type TFIODirectory = TFIODirectory of string
 type TFIOPath = TFIOPath of string
-
 type TFIOLock = IOLock of TFIOPath
-
 type TFIOStream = TFIOStream of int
+type TFIOOffset = TFIOOffset of int64
+type TFIOLength = TFIOLength of int64
 
 type TFIOProviderError =
     | FileAlreadyExists
@@ -19,25 +19,52 @@ type TFIOProvider = {
     ``open``: TFIOPath -> Result<TFIOStream,TFIOProviderError>
     close: TFIOStream -> unit
     read: TFIOStream -> Result<byte [],TFIOProviderError>
+    writeAll: TFIOStream -> byte [] -> Result<unit,TFIOProviderError>
     write: TFIOStream -> byte [] -> Result<unit,TFIOProviderError>
     move: TFIOPath -> TFIOPath -> Result<unit,TFIOProviderError>
     replace: TFIOPath -> TFIOPath -> TFIOPath -> Result<unit,TFIOProviderError>
     lock: TFIOPath -> Result<TFIOLock,TFIOProviderError>
     unlock: TFIOLock -> unit
     getBackupPath: TFIOPath -> TFIOPath
+    delete: TFIOPath -> Result<unit,TFIOProviderError>
+    seek: TFIOStream -> TFIOOffset -> Result<unit,TFIOProviderError>
+    setLength: TFIOStream -> TFIOLength -> Result<unit,TFIOProviderError>
+    position: TFIOStream -> Result<TFIOOffset,TFIOProviderError>
 }
-
-type Action =
-    | ReadAction of TFIOPath * byte []
-    | WriteAction of TFIOPath * byte []
-
-type State = Action list
 
 type TFIOError =
     | TFIOError of string
     | TFIOProviderError of TFIOProviderError
 
-type TFIO<'a> = TFIO of (State * TFIOProvider -> State * Result<'a,TFIOError>)
+type Action =
+    | ReadAction of TFIOPath * byte []
+    | WriteAction of TFIOPath * byte []
+
+type LogItem = {
+    action: Action
+    rollback: unit -> Result<unit,TFIOError>
+}
+
+type Log = Action list
+
+module Rollback =
+    let inline ``open`` prov stream () = Ok (prov.close stream)
+    let inline create prov path () = prov.delete path
+    let inline write prov stream offset length backup () =
+        result {
+            do! prov.seek stream offset
+            do! prov.write stream backup
+            do! prov.setLength stream length
+        }
+    let inline writeAll prov stream () =
+        result {
+            do! prov.seek stream (TFIOOffset 0L)
+            return! prov.setLength stream (TFIOLength 0L)
+        }
+    // TODO: Continue here
+
+
+type TFIO<'a> = TFIO of (Log * TFIOProvider -> Log * Result<'a,TFIOError>)
 
 type TFIOBuilder() =
     member _.Return(x) =
@@ -59,10 +86,10 @@ type TFIOBuilder() =
 let tfio = TFIOBuilder
 
 // TODO: This signature is probably not correct
-let rollback : State -> Result<unit,'b> = fun state ->
+let rollback : Log -> Result<unit,'b> = fun state ->
     Ok ()
 
-let readFile : TFIOProvider -> TFIOPath -> State -> Result<byte [],TFIOProviderError> = fun io path state ->
+let readFile : TFIOProvider -> TFIOPath -> Log -> Result<byte [],TFIOProviderError> = fun io path state ->
     let prevWriteContents logItem =
         match logItem with
         | WriteAction (writePath, contents) when writePath = path -> Some contents
@@ -114,7 +141,7 @@ let moveOrReplace : TFIOProvider -> TFIOPath -> TFIOPath -> TFIOPath -> Result<u
 let writeFile : TFIOProvider -> TFIOPath -> byte [] -> Result<unit,TFIOProviderError> = fun prov path contents ->
     result {
         let! (pathTemp, stream) = getTempFileStream prov path
-        do! prov.write stream contents
+        do! prov.writeAll stream contents
         do prov.close stream
         do! moveOrReplace prov pathTemp path (prov.getBackupPath path)
     }
@@ -130,7 +157,7 @@ let fileToLock a =
     | ReadAction (path,_) -> [ path ]
     | WriteAction (path,_) -> [ path ]
 
-let lockStateFiles : TFIOProvider -> State -> Result<TFIOLock list,TFIOProviderError> = fun io state ->
+let lockLogFiles : TFIOProvider -> Log -> Result<TFIOLock list,TFIOProviderError> = fun io state ->
     let lockFileFolder s t =
         match s with
         | Ok locks ->
@@ -147,13 +174,13 @@ let lockStateFiles : TFIOProvider -> State -> Result<TFIOLock list,TFIOProviderE
     |> Result.map List.rev
 
 // TODO: This can return 3 things: Validation success, validation fail, IO exception. The Result type is not sufficient
-let validateLogActions : TFIOProvider -> State -> Result<unit,string> = fun io state ->
+let validateLogActions : TFIOProvider -> Log -> Result<unit,string> = fun io state ->
     let validateLogAction action =
         match action with
         | ReadAction (path, contents) -> failwith "Not Implemented"
         | WriteAction (path, contents) -> failwith "Not Implemented"
     failwith ""
 
-let atomically : TFIOProvider -> TFIO<'b> -> State * Result<'b,TFIOError> = fun prov tfio ->
+let atomically : TFIOProvider -> TFIO<'b> -> Log * Result<'b,TFIOError> = fun prov tfio ->
     let (TFIO f) = tfio
     f ([], prov)
