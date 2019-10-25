@@ -17,6 +17,8 @@
     <Compile Include="TFIO.fs" />
     <Compile Include="TFIOSimple.fs" />
     <Compile Include="Log.fs" />
+    <Compile Include="NonEmptyList.fs" />
+    <Compile Include="NonEmptyList.fsi" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
